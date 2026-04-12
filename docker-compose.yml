@@ -1,7 +1,9 @@
+name: video-streaming-app
 services:
   streaming-server:
     build: .
     image: streaming-server-cpp:latest
+    container_name: streaming-server
     ports:
       - "9000:9000"
     volumes:
