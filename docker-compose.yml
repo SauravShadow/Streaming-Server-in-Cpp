@@ -7,4 +7,4 @@ services:
     ports:
       - "9000:9000"
     volumes:
-      - ./video:/app/video:ro
+      - C:\Users\HP\Desktop\HostedProjects\VideoStreaming_C++_Server\video:/app/video:ro
