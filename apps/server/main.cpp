@@ -28,6 +28,11 @@ void handleClient(int client_fd) {
   }
 
   // ROUTE FIRST
+  // Map root "/" to the video library by default
+  if (req.path == "/") {
+    req.path = "/video/";
+  }
+
   if (req.path.find("/video/") == 0) {
     streaming::VideoHandler::handle(client_fd, req);
     return;

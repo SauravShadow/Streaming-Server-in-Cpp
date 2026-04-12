@@ -1,0 +1,23 @@
+name: CI/CD Deployment
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build-and-deploy:
+    runs-on: self-hosted
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Rebuild and Update Docker Containers
+        shell: powershell
+        run: |
+          docker-compose up --build -d
+          
+      - name: Cleanup Unused Docker Images
+        shell: powershell
+        run: |
+          docker image prune -f

@@ -99,10 +99,12 @@ std::string getContentType(const std::string &file_path) {
     return "video/x-msvideo";
   if (ext == ".webp")
     return "image/webp";
-  if (ext == ".jpg" || ext == ".jpeg")
+  if (ext == ".jpg" || ext == ".jpeg" || ext == ".jfif")
     return "image/jpeg";
   if (ext == ".png")
     return "image/png";
+  if (ext == ".avif")
+    return "image/avif";
 
   return "application/octet-stream";
 }
@@ -159,7 +161,8 @@ bool isImageFile(const std::filesystem::path &path) {
     ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
   }
 
-  return ext == ".webp" || ext == ".jpg" || ext == ".jpeg" || ext == ".png";
+  return ext == ".webp" || ext == ".jpg" || ext == ".jpeg" || ext == ".png" ||
+         ext == ".jfif" || ext == ".avif";
 }
 
 std::string displayTitle(const std::string &name) {
@@ -339,24 +342,19 @@ std::string buildLibraryPage(const http::HttpRequest &req,
 }
 
 std::string buildHowItWorksPage() {
-  return R"HTML(<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>How It Works</title><style>:root{color-scheme:dark;--bg:#0b0b0b;--panel:#171717;--panel-2:#202020;--text:#f3efe6;--muted:#b7aea2;--line:#3a342d;--accent:#e3483b;--accent-2:#65c18c}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,Arial,sans-serif}.page{max-width:1100px;margin:0 auto;padding:32px 18px 72px}.nav{display:inline-block;color:var(--muted);text-decoration:none;border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin-bottom:32px}.eyebrow{color:var(--accent-2);font-weight:800;text-transform:uppercase;font-size:13px}h1{font-size:44px;line-height:1.08;margin:10px 0 18px}h2{font-size:24px;margin:0 0 12px}p,li{color:var(--muted);line-height:1.7;font-size:17px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}.panel{border:1px solid var(--line);border-radius:8px;background:var(--panel);padding:22px;margin-top:18px}.wide{margin-top:22px}.flow{display:grid;gap:10px}.flow div{background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:12px 14px;color:var(--text)}code{color:var(--accent-2)}strong{color:var(--text)}pre{overflow:auto;background:#090909;border:1px solid var(--line);border-radius:8px;padding:16px;color:var(--muted);line-height:1.5}</style></head><body><main class="page"><a class="nav" href="/video/">Back to library</a><div class="eyebrow">Project details</div><h1>How Subaru's streaming server works</h1><p>This project is a C++17 HTTP video streaming server. It accepts browser requests over raw TCP sockets, parses a small HTTP request model, routes <code>/video/</code> traffic into the streaming module, scans the local media folder, and streams files with byte-range support so large videos can start quickly and seek properly.</p><section class="panel wide"><h2>Request flow</h2><div class="flow"><div>Browser opens <code>/video/</code> or a video link.</div><div><code>Network::TcpServer</code> accepts the TCP client on port <code>9000</code>.</div><div>The connection is pushed into the thread pool so multiple clients can be handled concurrently.</div><div><code>HttpParser</code> extracts method, path, version, and headers from the raw request.</div><div><code>VideoHandler</code> resolves the URL path, builds the library page, serves cover images, or prepares video headers.</div><div><code>RangeParser</code> reads headers like <code>Range: bytes=1000-</code> for seeking.</div><div><code>FileStreamer</code> sends the selected byte range using macOS <code>sendfile</code>.</div></div></section><section class="grid"><div class="panel"><h2>Core modules</h2><ul><li><strong>apps/server</strong>: application entry point, route selection, and <code>SIGPIPE</code> handling.</li><li><strong>libs/network</strong>: socket creation, bind, listen, accept loop, and connection dispatch.</li><li><strong>libs/core</strong>: worker-thread pool for concurrent client handling.</li><li><strong>libs/http</strong>: lightweight HTTP request parsing.</li><li><strong>libs/streaming</strong>: media discovery, HTML library rendering, MIME detection, range parsing, and file streaming.</li></ul></div><div class="panel"><h2>APIs and system calls</h2><ul><li><code>socket</code>, <code>setsockopt</code>, <code>bind</code>, <code>listen</code>, and <code>accept</code> create the TCP server.</li><li><code>read</code> receives the HTTP request bytes.</li><li><code>send</code> writes HTTP headers and HTML pages.</li><li><code>stat</code> checks whether paths exist and whether they are files or directories.</li><li><code>sendfile</code> streams video bytes efficiently from disk to socket.</li><li><code>std::filesystem</code> recursively scans the media library and finds cover images.</li></ul></div><div class="panel"><h2>HTTP routes</h2><ul><li><code>GET /video/</code>: renders the dark media library page.</li><li><code>GET /video/how-it-works</code>: opens this project details page.</li><li><code>GET /video/&lt;path&gt;</code>: serves videos and cover images from the media root.</li><li><code>HEAD /video/&lt;path&gt;</code>: returns headers only, useful for browser probing.</li><li><code>Range</code> requests return <code>206 Partial Content</code> with <code>Content-Range</code>.</li></ul></div><div class="panel"><h2>Multithreading</h2><p>The main server thread keeps accepting incoming clients. Each accepted socket is submitted to <code>core::ThreadPool</code>, where a worker thread parses and handles that request. This means one client streaming a large file does not block the accept loop from receiving another client.</p></div></section><section class="panel wide"><h2>File structure</h2><pre>streaming_server/
-  apps/server/main.cpp
-  libs/core/include/core/thread_pool.h
-  libs/core/src/thread_pool.cpp
-  libs/network/include/network/tcp_server.h
-  libs/network/src/tcp_server.cpp
-  libs/http/include/http/http_parser.h
-  libs/http/include/http/http_request.h
-  libs/http/src/http_parser.cpp
-  libs/streaming/include/streaming/
-  libs/streaming/src/video_handler.cpp
-  libs/streaming/src/range_parser.cpp
-  libs/streaming/src/file_streamer.cpp
-  video/
-    Black Lagoon/
-      Black_Lagoon_C.webp
-      Season 1/
-        episode files...</pre></section><section class="panel wide"><h2>Adding more videos</h2><p>Create any folder structure under <code>video/</code>. For example, add <code>video/New Anime/Season 2/episode.mp4</code>. The library page uses recursive scanning, so it will appear automatically. Add a WebP, JPG, JPEG, or PNG anywhere under the show folder to use it as cover art.</p></section><section class="panel wide"><h2>Current limits</h2><p>The server is intentionally small and educational. It does not transcode unsupported codecs, does not cache the media index, and uses a simple HTML renderer inside C++ for now. A strong next step would be a media index cache, cleaner route layer, and optional FFmpeg conversion for browser-safe MP4 playback.</p></section></main></body></html>)HTML";
+  return R"HTML(<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>How It Works</title><style>:root{color-scheme:dark;--bg:#0b0b0b;--panel:#171717;--panel-2:#202020;--text:#f3efe6;--muted:#b7aea2;--line:#3a342d;--accent:#e3483b;--accent-2:#65c18c}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,Arial,sans-serif}.page{max-width:1100px;margin:0 auto;padding:32px 18px 72px}.nav{display:inline-block;color:var(--muted);text-decoration:none;border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin-bottom:32px}.eyebrow{color:var(--accent-2);font-weight:800;text-transform:uppercase;font-size:13px}h1{font-size:44px;line-height:1.08;margin:10px 0 18px}h2{font-size:24px;margin:0 0 12px}p,li{color:var(--muted);line-height:1.7;font-size:17px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}.panel{border:1px solid var(--line);border-radius:8px;background:var(--panel);padding:22px;margin-top:18px}.wide{margin-top:22px}.flow{display:grid;gap:10px}.flow div{background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:12px 14px;color:var(--text)}code{color:var(--accent-2)}strong{color:var(--text)}pre{overflow:auto;background:#090909;border:1px solid var(--line);border-radius:8px;padding:16px;color:var(--muted);line-height:1.5}</style><script type="module">import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';mermaid.initialize({ startOnLoad: true, theme: 'dark' });</script></head><body><main class="page"><a class="nav" href="/">Back to library</a><div class="eyebrow">Project details</div><h1>How Subaru's streaming server works</h1><p>This project is a high-performance C++ video streaming backend. It uses raw TCP sockets, custom HTTP parsing, and a modular architecture to serve media files with professional-grade efficiency.</p><section class="panel wide"><h2>System Architecture (HLD)</h2><div class="mermaid">
+graph TD
+    subgraph "Traffic Flow"
+        User([🌐 User Browser]) -->|Public URL| CF[☁️ Cloudflare Tunnel]
+        CF -->|Local Port 9000| Server[🚀 C++ Streaming Server]
+        Server -->|Recursive Scan| Disk[(📂 Video Storage)]
+    end
+
+    subgraph "CI/CD Pipeline"
+        GitHub[🐙 GitHub Repo] -- "Push to main" --> Runner[🏃 Self-Hosted Runner]
+        Runner -- "Docker Build & Deploy" --> Server
+    end
+</div></section><section class="panel wide"><h2>Request flow</h2><div class="flow"><div><strong>Routing:</strong> Root <code>/</code> is automatically mapped to the <code>/video/</code> library.</div><div><strong>TCP Server:</strong> Accepts clients on port <code>9000</code> and hands them to a <strong>Thread Pool</strong>.</div><div><strong>HTTP Parser:</strong> Extracts method, path, and headers (like <code>Range</code>).</div><div><strong>Video Handler:</strong> Scans the <code>video</code> folder recursively, finding <strong>.mp4</strong> episodes and <strong>JPEG/AVIF</strong> covers.</div><div><strong>File Streamer:</strong> Executes the dual-mode streaming logic.</div></div></section><section class="grid"><div class="panel"><h2>Dual Streaming Engine</h2><ul><li><strong>🔥 Optimized (Final):</strong> Uses <code>sendfile()</code> for zero-copy transfer. Data moves from Disk → Kernel → Network without passing through User space.</li><li><strong>🔹 Basic (Initial):</strong> A robust <code>read() -> send()</code> fallback that ensures the server works on <strong>Windows</strong> and non-Linux systems.</li></ul></div><div class="panel"><h2>Content Discovery</h2><ul><li><strong>Automatic Indexing:</strong> Scans any folder hierarchy under <code>video/</code>.</li><li><strong>Deep Cover Art:</strong> Automatically finds and displays images (including <code>.jfif</code> and <code>.avif</code>) found deep within your series folders as thumbnails.</li><li><strong>Range Support:</strong> Full support for <code>206 Partial Content</code>, allowing instant seeking and scrubbing.</li></ul></div></section><section class="panel wide"><h2>Cross-Platform Architecture</h2><p>The code is designed to be truly portable. It uses POSIX headers for Linux/Docker production environments while providing native Win32 compatibility for local Windows development, mapping socket and file I/O operations seamlessly across operating systems.</p></section></main></body></html>)HTML";
 }
 
 void sendHtmlResponse(int client_fd, const http::HttpRequest &req,
