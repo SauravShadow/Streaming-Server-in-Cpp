@@ -1,5 +1,6 @@
 #include "streaming/file_streamer.h"
 #include <cstdio>
+#include <cerrno>
 #include <fcntl.h>
 #include <sys/socket.h>
 #include <sys/uio.h>
@@ -22,8 +23,9 @@ bool FileStreamer::stream(int client_fd, const std::string &file_path,
   int result = sendfile(fd, client_fd, offset, &bytes_to_send, nullptr, 0);
 
   if (result == -1) {
-    // fallback (optional)
-    perror("sendfile failed");
+    if (errno != EPIPE && errno != ENOTCONN && errno != ECONNRESET) {
+      perror("sendfile failed");
+    }
   }
 
   close(fd);
