@@ -1,0 +1,8 @@
+services:
+  streaming-server:
+    build: .
+    image: streaming-server-cpp:latest
+    ports:
+      - "9000:9000"
+    volumes:
+      - ./video:/app/video:ro

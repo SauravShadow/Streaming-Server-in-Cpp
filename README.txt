@@ -130,7 +130,7 @@ streaming-server/
 │   │   │   └── file_utils.cpp
 │   │   └── CMakeLists.txt
 │
-├── videos/                       # Test media files
+├── video/                       # Test media files
 │   └── sample.mp4
 │
 ├── configs/                      # Config files
@@ -146,3 +146,27 @@ streaming-server/
 │   └── streaming_tests.cpp
 │
 └── build/                        # CMake build output (ignored)
+
+## Docker
+
+Build and run with Docker Compose:
+
+```bash
+docker compose up --build
+```
+
+Then open:
+
+```text
+http://localhost:9000/video/
+```
+
+The container mounts the local `./video` folder into `/app/video`, so you can add
+new media locally without rebuilding the Docker image.
+
+Manual Docker commands:
+
+```bash
+docker build -t streaming-server-cpp .
+docker run --rm -p 9000:9000 -v "$(pwd)/video:/app/video:ro" streaming-server-cpp
+```

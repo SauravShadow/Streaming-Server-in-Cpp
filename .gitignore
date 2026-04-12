@@ -1,0 +1,17 @@
+build/
+.cache/
+.DS_Store
+**/.DS_Store
+
+compile_commands.json
+
+apps/server/server
+video/**/*.mp4
+video/**/*.mkv
+video/**/*.webm
+video/**/*.mov
+video/**/*.avi
+video/**/*.webp
+video/**/*.jpg
+video/**/*.jpeg
+video/**/*.png
