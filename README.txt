@@ -130,7 +130,7 @@ streaming-server/
 │   │   │   └── file_utils.cpp
 │   │   └── CMakeLists.txt
 │
-├── videos/                       # Test media files
+├── video/                       # Test media files
 │   └── sample.mp4
 │
 ├── configs/                      # Config files
