@@ -1,4 +1,4 @@
-name: video-streaming-app
+version: '3.8'
 services:
   streaming-server:
     build: .
@@ -7,4 +7,4 @@ services:
     ports:
       - "9000:9000"
     volumes:
-      - C:\Users\HP\Desktop\HostedProjects\VideoStreaming_C++_Server\video:/app/video:ro
+      - ./video:/app/video:ro

@@ -90,7 +90,7 @@ std::string getContentType(const std::string &file_path) {
   if (ext == ".mp4")
     return "video/mp4";
   if (ext == ".mkv")
-    return "video/x-matroska";
+    return "video/webm";
   if (ext == ".webm")
     return "video/webm";
   if (ext == ".mov")

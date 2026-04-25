@@ -9,15 +9,10 @@ jobs:
     runs-on: self-hosted
     
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Rebuild and Update Docker Containers
-        shell: powershell
+      - name: Update and Deploy Server
         run: |
-          docker-compose up --build -d
-          
-      - name: Cleanup Unused Docker Images
-        shell: powershell
-        run: |
-          docker image prune -f
+          cd /home/subaru/projects/StreamingServer/Streaming-Server-in-Cpp
+          git fetch origin
+          git reset --hard origin/main
+          sg docker -c "docker-compose up -d --build"
+          sg docker -c "docker image prune -f"
