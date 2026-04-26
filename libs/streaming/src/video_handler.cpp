@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -168,20 +169,39 @@ bool isImageFile(const std::filesystem::path &path) {
 std::string displayTitle(const std::string &name) {
   std::string title = name;
   std::replace(title.begin(), title.end(), '_', ' ');
+  if (title.length() > 4 && title.substr(title.length() - 4) == ".mkv") title = title.substr(0, title.length() - 4);
+  if (title.length() > 4 && title.substr(title.length() - 4) == ".mp4") title = title.substr(0, title.length() - 4);
   return title;
 }
 
-std::string getSeriesDescription(const std::string &series_name) {
-  if (series_name.find("Black Lagoon") != std::string::npos || 
-      series_name.find("Season") != std::string::npos) {
-    return "A lethal dance of bullets and betrayals in the lawless underworld of Roanapur—where morality is a luxury and only the ruthless survive.";
+std::string getSeriesDescription(const std::filesystem::path &series_path) {
+  if (std::filesystem::is_directory(series_path)) {
+    for (const auto &entry : std::filesystem::directory_iterator(series_path)) {
+      if (entry.is_regular_file() && entry.path().extension() == ".txt") {
+        std::ifstream ifs(entry.path());
+        if (ifs.good()) {
+          std::string content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+          if (!content.empty()) return content;
+        }
+      }
+    }
   }
+  return "A high-performance media shelf powered by C++.";
+}
 
-  return "A high-performance media shelf powered by C++. Drop episodes anywhere inside the video folder and they will appear here automatically.";
+std::string findCoverForDirectory(const std::filesystem::path &dir_path) {
+  if (!std::filesystem::is_directory(dir_path))
+    return "";
+  for (const auto &entry : std::filesystem::directory_iterator(dir_path)) {
+    if (entry.is_regular_file() && isImageFile(entry.path())) {
+      return entry.path().string();
+    }
+  }
+  return "";
 }
 
 std::string findCoverForSeries(const std::filesystem::path &series_path) {
-  if (!std::filesystem::exists(series_path))
+  if (!std::filesystem::is_directory(series_path))
     return "";
 
   for (const auto &entry : std::filesystem::recursive_directory_iterator(
@@ -215,21 +235,80 @@ std::string makeAssetUrl(const std::string &request_path,
 }
 
 std::string getTopLevelFolder(const std::filesystem::path &relative_path) {
-  auto it = relative_path.begin();
-  if (it == relative_path.end())
+  if (!relative_path.has_parent_path())
     return "Library";
 
+  auto it = relative_path.begin();
   return it->string();
 }
 
 struct SeriesSection {
   std::string name;
   std::string cover_url;
+  std::string description;
   std::vector<std::filesystem::path> videos;
 };
 
+std::string buildPlayerPage(const http::HttpRequest &req, const std::string &video_path) {
+  std::string video_url = video_path; // this is the direct URL to the video file, e.g. /video/Oregairu/01.mkv
+  std::string encoded_video_url = encodeUrlPath(video_path);
+  
+  // Find next episode logic
+  std::string fs_path = resolveVideoPath(decodeUrlPath(video_path));
+  std::string next_episode_url = "";
+  
+  if (!fs_path.empty()) {
+    std::filesystem::path p(fs_path);
+    if (std::filesystem::exists(p.parent_path())) {
+      std::vector<std::string> episodes;
+      for (const auto &entry : std::filesystem::directory_iterator(p.parent_path())) {
+        if (entry.is_regular_file() && isVideoFile(entry.path())) {
+           episodes.push_back(entry.path().filename().string());
+        }
+      }
+      std::sort(episodes.begin(), episodes.end());
+      
+      std::string current_filename = p.filename().string();
+      for (size_t i = 0; i < episodes.size(); ++i) {
+        if (episodes[i] == current_filename && i + 1 < episodes.size()) {
+          // Found next episode!
+          std::string base_req_path = req.path; // e.g. /watch/video/Oregairu/01.mkv
+          // We need to replace the last part.
+          size_t last_slash = base_req_path.find_last_of('/');
+          if (last_slash != std::string::npos) {
+              next_episode_url = base_req_path.substr(0, last_slash + 1) + encodeUrlPath(episodes[i+1]);
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  std::ostringstream body;
+  body << R"(<!doctype html><html><head><meta charset="utf-8">)"
+       << R"(<meta name="viewport" content="width=device-width, initial-scale=1">)"
+       << R"(<title>Player</title><style>)"
+       << R"(:root{color-scheme:dark;--bg:#0b0b0b;--panel:#171717;--text:#f3efe6;--accent:#e3483b;--line:#3a342d;}*{box-sizing:border-box}body{margin:0;font-family:Inter,Arial,sans-serif;background:var(--bg);color:var(--text);display:flex;flex-direction:column;height:100vh;}a{color:inherit}.topbar{display:flex;justify-content:space-between;padding:15px 30px;border-bottom:1px solid var(--line);background:#000;}.brand{font-weight:bold;text-decoration:none;}.btn{background:var(--accent);color:#fff;padding:8px 16px;border-radius:4px;text-decoration:none;font-weight:bold;}.player-container{flex:1;display:flex;justify-content:center;align-items:center;padding:20px;background:#050505;}video{width:100%;max-width:1200px;max-height:100%;border-radius:8px;background:#000;box-shadow: 0 10px 40px rgba(0,0,0,0.8);}.bottom-bar{padding:20px 30px;display:flex;justify-content:space-between;align-items:center;background:#111;border-top:1px solid var(--line);}.title{font-size:24px;font-weight:bold;}.subtitle{color:#888;font-size:14px;margin-top:4px;})"
+       << R"(</style></head><body>)"
+       << R"(<header class="topbar"><a href="/" class="brand">&larr; Back to Library</a></header>)"
+       << R"(<div class="player-container"><video controls autoplay>)"
+       << R"(<source src="/)" << encoded_video_url << R"(" type="video/mp4"></video></div>)"
+       << R"(<div class="bottom-bar"><div><div class="title">)" << escapeHtml(displayTitle(std::filesystem::path(fs_path).filename().string())) << R"(</div></div>)";
+  
+  if (!next_episode_url.empty()) {
+        body << R"(<a href=")" << next_episode_url << R"(" class="btn">Next Episode &rarr;</a>)";
+  }
+  
+  body << R"(</div></body></html>)";
+
+  return body.str();
+}
+
 std::string buildLibraryPage(const http::HttpRequest &req,
                              const std::string &directory_path) {
+  
+  bool is_root = (req.path == "/" || req.path == "/video" || req.path == "/video/");
+
   std::vector<std::filesystem::path> video_paths;
 
   for (const auto &entry : std::filesystem::recursive_directory_iterator(
@@ -252,24 +331,36 @@ std::string buildLibraryPage(const http::HttpRequest &req,
   for (const auto &video_path : video_paths) {
     std::filesystem::path relative_path =
         std::filesystem::relative(video_path, directory_path);
-    std::string series_name = getTopLevelFolder(relative_path);
+        
+    std::string section_name;
+    if (is_root) {
+        section_name = getTopLevelFolder(relative_path);
+    } else {
+        if (relative_path.has_parent_path()) {
+            section_name = getTopLevelFolder(relative_path);
+        } else {
+            section_name = "Extras"; 
+        }
+    }
 
     auto existing = std::find_if(
         sections.begin(), sections.end(),
-        [&series_name](const SeriesSection &section) {
-          return section.name == series_name;
+        [&section_name](const SeriesSection &section) {
+          return section.name == section_name;
         });
 
     if (existing == sections.end()) {
       SeriesSection section;
-      section.name = series_name;
-
-      std::filesystem::path cover_path =
-          findCoverForSeries(std::filesystem::path(directory_path) / series_name);
+      section.name = section_name;
+      
+      std::filesystem::path series_dir = std::filesystem::path(directory_path) / section_name;
+      
+      std::filesystem::path cover_path = findCoverForSeries(series_dir);
       if (!cover_path.empty()) {
-        section.cover_url = makeAssetUrl(req.path, directory_path, cover_path);
+         section.cover_url = makeAssetUrl(req.path, directory_path, cover_path);
       }
-
+      
+      section.description = getSeriesDescription(series_dir);
       section.videos.push_back(relative_path);
       sections.push_back(section);
     } else {
@@ -281,60 +372,92 @@ std::string buildLibraryPage(const http::HttpRequest &req,
   body << R"(<!doctype html><html><head><meta charset="utf-8">)"
        << R"(<meta name="viewport" content="width=device-width, initial-scale=1">)"
        << R"(<title>Streaming Library</title><style>)"
-       << R"(:root{color-scheme:dark;--bg:#0b0b0b;--panel:#171717;--panel-2:#202020;--text:#f3efe6;--muted:#b7aea2;--line:#3a342d;--accent:#e3483b;--accent-2:#65c18c;}*{box-sizing:border-box}body{margin:0;font-family:Inter,Arial,sans-serif;background:var(--bg);color:var(--text);}a{color:inherit}.shell{min-height:100vh;background:linear-gradient(180deg,rgba(227,72,59,.16),rgba(11,11,11,.2) 360px),#0b0b0b}.topbar{display:flex;justify-content:space-between;gap:16px;align-items:center;padding:20px clamp(16px,4%,56px);border-bottom:1px solid var(--line);background:rgba(11,11,11,.92);position:sticky;top:0;z-index:10}.brand{font-weight:800;letter-spacing:0;text-transform:uppercase}.navlink{border:1px solid var(--line);padding:10px 14px;border-radius:8px;text-decoration:none;color:var(--muted)}.hero{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(260px,.9fr);gap:32px;align-items:end;padding:48px clamp(16px,4%,56px) 28px}.eyebrow{color:var(--accent-2);font-weight:700;text-transform:uppercase;font-size:13px;letter-spacing:0}.hero h1{font-size:44px;line-height:1.05;margin:12px 0 10px;max-width:820px}.hero h2{font-size:24px;line-height:1.2;margin:0 0 18px;color:var(--accent);font-weight:800}.hero p{font-size:18px;line-height:1.65;color:var(--muted);max-width:820px}.hero-cover{width:100%;max-height:420px;object-fit:cover;border-radius:8px;border:1px solid var(--line);box-shadow:0 24px 80px rgba(0,0,0,.5)}.library{padding:20px clamp(16px,4%,56px) 56px}.section{border-top:1px solid var(--line);padding:28px 0}.section-head{display:grid;grid-template-columns:150px minmax(0,1fr);gap:20px;align-items:start}.poster{width:150px;aspect-ratio:2/3;object-fit:cover;border-radius:8px;border:1px solid var(--line);background:var(--panel-2)}.poster-fallback{width:150px;aspect-ratio:2/3;border-radius:8px;border:1px solid var(--line);background:linear-gradient(135deg,#191919,#2a1f1f);display:grid;place-items:center;color:var(--muted);font-weight:800}.section h2{font-size:28px;margin:0 0 10px}.section p{margin:0;color:var(--muted);line-height:1.6}.episodes{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-top:22px}.episode{display:block;text-decoration:none;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px 16px;color:var(--text)}.episode:hover{border-color:var(--accent);background:#211817}.episode small{display:block;color:var(--accent-2);margin-top:8px}.empty{padding:32px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--muted)}@media (max-width:760px){.hero{grid-template-columns:1fr;padding-top:32px}.hero h1{font-size:34px}.section-head{grid-template-columns:96px minmax(0,1fr)}.poster,.poster-fallback{width:96px}})"
+       << R"(:root{color-scheme:dark;--bg:#0b0b0b;--panel:#171717;--panel-2:#202020;--text:#f3efe6;--muted:#b7aea2;--line:#3a342d;--accent:#e3483b;--accent-2:#65c18c;}*{box-sizing:border-box}body{margin:0;font-family:Inter,Arial,sans-serif;background:var(--bg);color:var(--text);}a{color:inherit;text-decoration:none}.shell{min-height:100vh;background:linear-gradient(180deg,rgba(227,72,59,.16),rgba(11,11,11,.2) 360px),#0b0b0b}.topbar{display:flex;justify-content:space-between;gap:16px;align-items:center;padding:20px clamp(16px,4%,56px);border-bottom:1px solid var(--line);background:rgba(11,11,11,.92);position:sticky;top:0;z-index:10}.brand{font-weight:800;letter-spacing:0;text-transform:uppercase}.navlink{border:1px solid var(--line);padding:10px 14px;border-radius:8px;color:var(--muted)}.hero{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(260px,.9fr);gap:32px;align-items:end;padding:48px clamp(16px,4%,56px) 28px}.eyebrow{color:var(--accent-2);font-weight:700;text-transform:uppercase;font-size:13px;letter-spacing:0}.hero h1{font-size:44px;line-height:1.05;margin:12px 0 10px;max-width:820px}.hero h2{font-size:24px;line-height:1.2;margin:0 0 18px;color:var(--accent);font-weight:800}.hero p{font-size:18px;line-height:1.65;color:var(--muted);max-width:820px}.hero-cover{width:100%;max-height:420px;object-fit:cover;border-radius:8px;border:1px solid var(--line);box-shadow:0 24px 80px rgba(0,0,0,.5)}.library{padding:20px clamp(16px,4%,56px) 56px}.section{border-top:1px solid var(--line);padding:28px 0}.section-head{display:grid;grid-template-columns:150px minmax(0,1fr);gap:20px;align-items:start}.poster{width:100%;aspect-ratio:2/3;object-fit:cover;border-radius:8px;border:1px solid var(--line);background:var(--panel-2)}.poster-fallback{width:100%;aspect-ratio:2/3;border-radius:8px;border:1px solid var(--line);background:linear-gradient(135deg,#191919,#2a1f1f);display:grid;place-items:center;color:var(--muted);font-weight:800}.section h2{font-size:28px;margin:0 0 10px}.section p{margin:0;color:var(--muted);line-height:1.6}.episodes{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:24px;margin-top:22px}.episode{display:block;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px 16px;color:var(--text);transition:0.2s}.episode:hover{border-color:var(--accent);background:#211817;transform:translateY(-2px);}.episode small{display:block;color:var(--accent-2);margin-top:8px}.series-card{display:flex;flex-direction:column;gap:12px;transition:0.2s;}.series-card:hover{transform:translateY(-4px);}.series-card-title{font-weight:bold;font-size:18px;text-align:center}.empty{padding:32px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--muted)}@media (max-width:760px){.hero{grid-template-columns:1fr;padding-top:32px}.hero h1{font-size:34px}.section-head{grid-template-columns:96px minmax(0,1fr)}})"
        << R"(</style></head><body><main class="shell">)"
-       << R"(<header class="topbar"><div class="brand">Saurav Subaru Stream</div><a class="navlink" href="/video/how-it-works">How it works</a></header>)";
+       << R"(<header class="topbar"><a href="/" class="brand">Saurav Subaru Stream</a><a class="navlink" href="/video/how-it-works">How it works</a></header>)";
 
-  if (!sections.empty()) {
-    const SeriesSection &featured = sections.front();
-    body << R"(<section class="hero"><div><div class="eyebrow">Now streaming</div><h1>Subaru welcomes you to this page</h1><h2>)"
-         << escapeHtml(displayTitle(featured.name)) << R"(</h2><p>)"
-         << escapeHtml(getSeriesDescription(featured.name))
-         << R"(</p></div>)";
+  if (is_root) {
+      std::string root_cover = findCoverForDirectory(directory_path);
+      std::string hero_cover_url;
+      if (!root_cover.empty()) {
+          hero_cover_url = makeAssetUrl(req.path, directory_path, root_cover);
+      }
+      
+      body << R"(<section class="hero"><div><div class="eyebrow">Now streaming</div><h1>Subaru welcomes you to this page</h1>)"
+           << R"(<p>A high-performance media shelf powered by C++.</p></div>)";
+           
+      if (!hero_cover_url.empty()) {
+          body << R"(<img class="hero-cover" src=")" << hero_cover_url << R"(" alt="Hero cover">)";
+      }
+      body << R"(</section>)";
 
-    if (!featured.cover_url.empty()) {
-      body << R"(<img class="hero-cover" src=")" << featured.cover_url
-           << R"(" alt=")" << escapeHtml(displayTitle(featured.name)) << R"( cover">)";
-    }
+      body << R"(<section class="library">)";
+      if (sections.empty()) {
+          body << R"(<div class="empty">No videos found yet. Add Media inside the video folder.</div>)";
+      } else {
+          body << R"(<h2>Library</h2><div class="episodes" style="grid-template-columns:repeat(auto-fill,minmax(180px,1fr));">)";
+          for (const SeriesSection &section : sections) {
+              std::string series_href = req.path;
+              if (!series_href.empty() && series_href.back() != '/') series_href += "/";
+              series_href += encodeUrlPath(section.name);
+              
+              body << R"(<a class="series-card" href=")" << series_href << R"("><div>)";
+              if (!section.cover_url.empty()) {
+                  body << R"(<img class="poster" src=")" << section.cover_url << R"(" alt="cover">)";
+              } else {
+                  body << R"(<div class="poster-fallback"></div>)";
+              }
+              body << R"(</div><div class="series-card-title">)" << escapeHtml(displayTitle(section.name)) << R"(</div></a>)";
+          }
+          body << R"(</div>)";
+      }
+      body << R"(</section>)";
+  } else {
+      // In a series directory
+      std::string series_name = std::filesystem::path(directory_path).filename().string();
+      std::string series_desc = getSeriesDescription(directory_path);
+      
+      std::string series_cover;
+      std::filesystem::path cover_path = findCoverForSeries(directory_path);
+      if (!cover_path.empty()) {
+         series_cover = makeAssetUrl(req.path, directory_path, cover_path);
+      }
 
-    body << R"(</section>)";
+      body << R"(<section class="hero"><div><div class="eyebrow">Series</div><h1>)" << escapeHtml(displayTitle(series_name)) << R"(</h1><p>)" << escapeHtml(series_desc) << R"(</p></div>)";
+      if (!series_cover.empty()) {
+          body << R"(<img class="hero-cover" style="width:250px;aspect-ratio:2/3;object-fit:cover;" src=")" << series_cover << R"(" alt="cover">)";
+      } else {
+          // If no global cover found, fallback
+          // We can use an empty div if preferred.
+      }
+      body << R"(</section>)";
+      
+      body << R"(<section class="library">)";
+      
+      for (const SeriesSection &section : sections) {
+          body << R"(<div style="margin-bottom: 36px;">)";
+          body << R"(<h2 style="font-size:22px;color:var(--text);border-bottom:1px solid var(--line);padding-bottom:12px;margin-bottom:16px;">)" << escapeHtml(displayTitle(section.name)) << R"(</h2>)";
+          body << R"(<div class="episodes" style="grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;margin-top:0;">)";
+          
+          for (const auto &relative_path : section.videos) {
+              // Relative to directory_path, make absolute URL for player
+              // Then encode.
+              std::string video_href = makeVideoUrl(req.path, relative_path.string());
+              if (video_href.find("/video/") == 0) {
+                 video_href = "/watch" + video_href;
+              }
+
+              std::string label = relative_path.filename().string();
+              
+              body << R"(<a class="episode" href=")" << video_href << R"(">)"
+                   << escapeHtml(displayTitle(label)) << R"(</a>)";
+          }
+          body << R"(</div></div>)";
+      }
+      body << R"(</section>)";
   }
 
-  body << R"(<section class="library">)";
-
-  if (sections.empty()) {
-    body << R"(<div class="empty">No videos found yet. Add MP4, MKV, WebM, MOV, or AVI files anywhere inside the video folder.</div>)";
-  }
-
-  for (const SeriesSection &section : sections) {
-    body << R"(<article class="section"><div class="section-head">)";
-
-    if (!section.cover_url.empty()) {
-      body << R"(<img class="poster" src=")" << section.cover_url << R"(" alt=")"
-           << escapeHtml(displayTitle(section.name)) << R"( cover">)";
-    } else {
-      body << R"(<div class="poster-fallback">)" << escapeHtml(displayTitle(section.name))
-           << R"(</div>)";
-    }
-
-    body << R"(<div><h2>)" << escapeHtml(displayTitle(section.name)) << R"(</h2><p>)"
-         << escapeHtml(getSeriesDescription(section.name))
-         << R"(</p></div></div><div class="episodes">)";
-
-    for (const auto &relative_path : section.videos) {
-      std::string href = makeVideoUrl(req.path, relative_path.string());
-      std::string label = relative_path.filename().string();
-
-      body << R"(<a class="episode" href=")" << href << R"(">)"
-           << escapeHtml(displayTitle(label)) << R"(<small>)"
-           << escapeHtml(relative_path.parent_path().string())
-           << R"(</small></a>)";
-    }
-
-    body << R"(</div></article>)";
-  }
-
-  body << R"(</section></main></body></html>)";
+  body << R"(</main></body></html>)";
   return body.str();
 }
 
@@ -430,6 +553,12 @@ void VideoHandler::handle(int client_fd, const http::HttpRequest &req) {
   if (decoded_path == "/video/how-it-works" ||
       decoded_path == "/video/how-it-works/") {
     sendHtmlResponse(client_fd, req, buildHowItWorksPage());
+    return;
+  }
+  
+  if (decoded_path.find("/watch/") == 0) {
+    std::string internal_video_path = decoded_path.substr(7); // keep the leading slash, so it starts with /video/
+    sendHtmlResponse(client_fd, req, buildPlayerPage(req, internal_video_path));
     return;
   }
 

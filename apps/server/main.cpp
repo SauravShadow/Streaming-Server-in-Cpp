@@ -33,7 +33,7 @@ void handleClient(int client_fd) {
     req.path = "/video/";
   }
 
-  if (req.path.find("/video/") == 0) {
+  if (req.path.find("/video/") == 0 || req.path.find("/watch/") == 0) {
     streaming::VideoHandler::handle(client_fd, req);
     return;
   }
