@@ -14,5 +14,8 @@ jobs:
           cd /home/subaru/projects/StreamingServer/Streaming-Server-in-Cpp
           git fetch origin
           git reset --hard origin/main
-          sg docker -c "docker-compose up -d --build"
-          sg docker -c "docker image prune -f"
+          sg docker -c "docker build -t streaming-server-cpp:latest ."
+          sg docker -c "docker stop streaming-server || true"
+          sg docker -c "docker rm streaming-server || true"
+          sg docker -c "docker run -d --name streaming-server -p 9000:9000 -v /home/subaru/projects/StreamingServer/Streaming-Server-in-Cpp/video:/app/video:ro streaming-server-cpp:latest"
+          sg docker -c "docker image prune -a -f --filter 'until=24h'"
